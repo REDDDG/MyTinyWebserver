@@ -1,10 +1,11 @@
 #include "config.h"
-
+#include "Ai/ai.h"
+#include "message.h"
 int main(int argc, char *argv[])
 {
     //需要修改的数据库信息,登录名,密码,库名
     string user = "root";
-    string passwd = "wrx12138";
+    string passwd = MYSQL_PAS;
     string databasename = "yourdb";
 
     //命令行解析
@@ -24,6 +25,7 @@ int main(int argc, char *argv[])
 
     //数据库
     server.sql_pool();
+    AIHandler::init(API_K);
 
     //线程池
     server.thread_pool();

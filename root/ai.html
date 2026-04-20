@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek AI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            background: #16213e;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .chat-header {
+            background: #0f3460;
+            color: white;
+            padding: 16px 20px;
+            text-align: center;
+        }
+
+        .chat-header h1 {
+            font-size: 1.3rem;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            display: flex;
+            gap: 10px;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .user-message {
+            justify-content: flex-end;
+        }
+
+        .assistant-message {
+            justify-content: flex-start;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 10px 14px;
+            border-radius: 18px;
+            line-height: 1.4;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+
+        .user-message .message-content {
+            background: #0f3460;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .assistant-message .message-content {
+            background: #e2e8f0;
+            color: #1a1a2e;
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-input-container {
+            padding: 16px;
+            background: #0f3460;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 24px;
+            font-size: 0.95rem;
+            outline: none;
+            resize: none;
+            font-family: inherit;
+        }
+
+        .send-btn {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 0 20px;
+            border-radius: 24px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .send-btn:hover {
+            opacity: 0.9;
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .typing-indicator {
+            background: #e2e8f0;
+            padding: 10px 14px;
+            border-radius: 18px;
+            display: inline-flex;
+            gap: 4px;
+        }
+
+        .typing-indicator span {
+            width: 6px;
+            height: 6px;
+            background: #64748b;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-6px); }
+        }
+
+        @media (max-width: 640px) {
+            .message-content {
+                max-width: 85%;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="chat-container">
+    <div class="chat-header">
+        <h1>🤖 DeepSeek AI</h1>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+        <div class="message assistant-message">
+            <div class="message-content">你好！有什么可以帮助你的？（非流式输出，maxtoken为5000，没有上下文记忆，需要的输出过大可能无返回）</div>
+        </div>
+    </div>
+    <div class="chat-input-container">
+        <textarea class="chat-input" id="chatInput" rows="1" placeholder="输入问题..."></textarea>
+        <button class="send-btn" id="sendBtn">发送</button>
+    </div>
+</div>
+
+<script>
+    const API_URL = '/9';  // 替换为你的后端地址
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    let isWaiting = false;
+
+    // 自动调整高度
+    chatInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+    });
+
+    async function sendMessage() {
+        const message = chatInput.value.trim();
+        if (!message || isWaiting) return;
+
+        chatInput.value = '';
+        chatInput.style.height = 'auto';
+
+        addMessage(message, 'user');
+        scrollToBottom();
+
+        isWaiting = true;
+        sendBtn.disabled = true;
+
+        await sendRequest(message);
+
+        isWaiting = false;
+        sendBtn.disabled = false;
+        chatInput.focus();
+    }
+
+    async function sendRequest(message) {
+        const loadingId = showTyping();
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: message })
+            });
+
+            hideTyping(loadingId);
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const data = await response.json();
+            // const reply = data.reply || data.message || data.response || JSON.stringify(data);
+            const reply = data.output[2].content[0].text;
+            addMessage(reply, 'assistant');
+
+        } catch (error) {
+            hideTyping(loadingId);
+            addMessage(`错误: ${error.message}`, 'assistant');
+        }
+
+        scrollToBottom();
+    }
+
+    function addMessage(content, role) {
+        const div = document.createElement('div');
+        div.className = `message ${role}-message`;
+        div.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+        chatMessages.appendChild(div);
+        scrollToBottom();
+    }
+
+    function showTyping() {
+        const id = 'typing-' + Date.now();
+        const div = document.createElement('div');
+        div.className = 'message assistant-message';
+        div.id = id;
+        div.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
+        chatMessages.appendChild(div);
+        scrollToBottom();
+        return id;
+    }
+
+    function hideTyping(id) {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    chatInput.focus();
+</script>
+</body>
+</html>

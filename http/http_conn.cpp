@@ -2,7 +2,7 @@
 
 #include <mysql/mysql.h>
 #include <fstream>
-
+#include "../Ai/ai.h"
 //定义http响应的一些状态信息
 const char *ok_200_title = "OK";
 const char *error_400_title = "Bad Request";
@@ -153,7 +153,8 @@ void http_conn::init()
     m_state = 0;
     timer_flag = 0;
     improv = 0;
-
+    m_is_json_response = false;
+    m_json_content.clear();
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
     memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
     memset(m_real_file, '\0', FILENAME_LEN);
@@ -455,8 +456,14 @@ http_conn::HTTP_CODE http_conn::do_request()
                 strcpy(m_url, "/logError.html");
         }
     }
+    if(*(p+1)=='h'){
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/judge.html");
+        strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
-    if (*(p + 1) == '0')
+        free(m_url_real);
+    }
+    else if (*(p + 1) == '0')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/register.html");
@@ -495,6 +502,81 @@ http_conn::HTTP_CODE http_conn::do_request()
         strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
 
         free(m_url_real);
+    }
+    else if(*(p+1)=='8'){
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/ai.html");
+        strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
+        free(m_url_real);
+    }
+    else if(*(p+1)=='9'){
+        string quest;
+        bool op=false;
+        for(int i=0;i< strlen(m_string);++i){
+            if(m_string[i]=='}')op=false,quest;
+            if(op)quest.push_back(m_string[i]);
+            if(m_string[i]==':')op=true;
+        }
+        quest=quest.substr(1,quest.length()-2);
+        string custom=AIHandler::chat(quest);
+        string json_body =
+                "{"
+                "\"id\":\"resp_abc123\","
+                "\"object\":\"response\","
+                "\"status\":\"completed\","
+                "\"model\":\"hermes-agent\","
+                "\"output\":["
+                "{"
+                "\"type\":\"function_call\","
+                "\"name\":\"terminal\","
+                "\"arguments\":\"{\\\"command\\\":\\\"ls\\\"}\","
+                "\"call_id\":\"call_1\""
+                "},"
+                "{"
+                "\"type\":\"function_call_output\","
+                "\"call_id\":\"call_1\","
+                "\"output\":\"README.md src/ tests/\""
+                "},"
+                "{"
+                "\"type\":\"message\","
+                "\"role\":\"assistant\","
+                "\"content\":["
+                "{"
+                "\"type\":\"output_text\","
+                "\"text\":\""+custom+"\""
+                "}"
+                "]"
+                "}"
+                "],"
+                "\"usage\":{"
+                "\"input_tokens\":50,"
+                "\"output_tokens\":200,"
+                "\"total_tokens\":250"
+                "}"
+                "}";
+
+// 自动精确计算JSON长度，彻底解决position467报错！
+        int body_len = json_body.length();
+
+// 拼接完整HTTP响应
+        char response[1024];
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: application/json\r\n"
+                 "Content-Length: %d\r\n"
+                 "Connection: close\r\n"
+                 "\r\n"
+                 "%s",
+                 body_len, json_body.c_str());
+
+// 【重点】发送的时候必须发送整个response的长度！！！
+        send(m_sockfd, response, strlen(response),0);
+        //send(m_sockfd, json_response, strlen(json_response), 0);
+        return INTERNAL_ERROR;
+        // 设置一个假的文件路径（不会被使用）
+        strcpy(m_real_file, "/tmp/dummy.json");
+        return FILE_REQUEST;
     }
     else
         strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
@@ -656,6 +738,24 @@ bool http_conn::process_write(HTTP_CODE ret)
     }
     case FILE_REQUEST:
     {
+        if (m_is_json_response) {
+            // 添加 JSON 格式的 Content-Type
+            add_response("Content-Type: application/json\r\n");
+            add_content_length(m_json_content.size());
+            add_blank_line();
+            add_content(m_json_content.c_str());
+
+            // 设置 writev 结构
+            m_iv[0].iov_base = m_write_buf;
+            m_iv[0].iov_len = m_write_idx;
+            m_iv_count = 1;
+            bytes_to_send = m_write_idx;
+
+            // 重置标志
+            m_is_json_response = false;
+            return true;
+        }
+
         add_status_line(200, ok_200_title);
         if (m_file_stat.st_size != 0)
         {

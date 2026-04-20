@@ -140,6 +140,9 @@ private:
     int bytes_have_send;
     char *doc_root;
 
+    bool m_is_json_response;
+    std::string m_json_content;
+
     map<string, string> m_users;
     int m_TRIGMode;
     int m_close_log;
